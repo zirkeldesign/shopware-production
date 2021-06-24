@@ -16,6 +16,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
@@ -23,23 +24,19 @@ class SystemUpdateFinishCommand extends Command
 {
     public static $defaultName = 'system:update:finish';
 
-    private SystemConfigService $systemConfigService;
-
-    private EventDispatcherInterface $eventDispatcher;
-
-    private ContainerInterface $container;
+    /**
+     * @var SymfonyStyle
+     */
+    protected $io;
 
     /**
-     * @psalm-suppress ContainerDependency
+     * @var ContainerInterface
      */
-    public function __construct(
-        SystemConfigService $systemConfigService,
-        EventDispatcherInterface $eventDispatcher,
-        ContainerInterface $container
-    ) {
+    private $container;
+
+    public function __construct(ContainerInterface $container)
+    {
         parent::__construct();
-        $this->systemConfigService = $systemConfigService;
-        $this->eventDispatcher = $eventDispatcher;
         $this->container = $container;
     }
 
@@ -60,11 +57,14 @@ class SystemUpdateFinishCommand extends Command
         $containerWithoutPlugins = $this->rebootKernelWithoutPlugins();
 
         $context = Context::createDefaultContext();
-        $oldVersion = $this->systemConfigService->getString(UpdateController::UPDATE_PREVIOUS_VERSION_KEY);
+        /** @var SystemConfigService $systemConfigService */
+        $systemConfigService = $this->container->get(SystemConfigService::class);
+        $oldVersion = $systemConfigService->getString(UpdateController::UPDATE_PREVIOUS_VERSION_KEY);
 
         $newVersion = $containerWithoutPlugins->getParameter('kernel.shopware_version');
-        if (!\is_string($newVersion)) {
-            throw new \RuntimeException('Container parameter "kernel.shopware_version" needs to be a string');
+
+        if (!is_string($newVersion)) {
+            throw new \RuntimeException('Parameter kernel.shopware_version needs to be an string');
         }
 
         /** @var EventDispatcherInterface $eventDispatcherWithoutPlugins */
@@ -73,8 +73,10 @@ class SystemUpdateFinishCommand extends Command
 
         $this->runMigrations($output);
 
+        /** @var EventDispatcherInterface $eventDispatcher */
+        $eventDispatcher = $this->container->get('event_dispatcher');
         $updateEvent = new UpdatePostFinishEvent($context, $oldVersion, $newVersion);
-        $this->eventDispatcher->dispatch($updateEvent);
+        $eventDispatcher->dispatch($updateEvent);
 
         $this->installAssets($output);
 
